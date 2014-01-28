@@ -1,9 +1,15 @@
-steamnews, a Python script for syndicating Steam game news in Atom format, readable by all good news readers.
+steamnews, a Python script for syndicating Steam game news in Atom format,
+readable by all good news readers.
 
-Feeds are available at http://getoffmalawn.com/steamnews/. Feel free to use it for your own thing, if you want. See LICENSE file.
+Feeds are available at http://getoffmalawn.com/steamnews/. Feel free to use it
+for your own thing, if you want. See LICENSE file.
 
 Written in Python 3 using the following libraries;
 
     - asyncio (asynchronous I/O...)
     - bbcode (rendering article bodies)
     - jinja2 (atom XML rendering)
+
+Steam is really inconsistent in its article formats (HTML sometimes, bbcode
+other times... probably more.) so it's kind of hard to make things look great
+all the time. If you find any issues, let me know so I can take a look at them and try to normalise them.
