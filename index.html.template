@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en" ng-app="steamnews">
+  <head>
+    <meta charset="utf-8">
+    <title>SteamNews - RSS Feeds for Steam Games</title>
+    <link rel="stylesheet" href="/steamnews/foundation.min.css">
+    <script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.2.10/angular.min.js"></script>
+
+    <script>
+      var app = angular.module('steamnews', []);
+      app.directive('selectOnClick', function () {
+          return function (scope, element, attrs) {
+            element.bind('click', function () {
+              this.select();
+            });
+          };
+      });
+
+      function GameListCtrl($scope, $http) {
+        $scope.games = INSERT_GAMES_HERE;
+        $scope.delayedQuery = "";
+        $scope.query = "";
+        $scope.split_queries = [];
+        $scope.timeout = null;
+
+        $scope.$watch("delayedQuery", function() {
+          if ($scope.timeout != null) {
+            clearTimeout($scope.timeout);
+          }
+
+          $scope.timeout = setTimeout(function() {
+            $scope.$apply(function() {
+              // performing the split once every 400ms is way, way better
+              $scope.query = $scope.delayedQuery;
+              $scope.split_queries = $scope.delayedQuery.split(',');
+
+              for (var i = 0; i < $scope.split_queries.length; ++i) {
+                $scope.split_queries[i] = $scope.split_queries[i].replace(/^ +/, '').replace(/ +$/, '');
+              }
+            });
+          }, 400);
+        });
+
+        $scope.FilterGame = function(game) {
+          if ($scope.query.length == 0) {
+            return game;
+          }
+
+          for (var i = 0; i < $scope.split_queries.length; ++i) {
+            var query = $scope.split_queries[i];
+            if (query.length && game.name.toLowerCase().indexOf(query) != -1) {
+              return game;
+            }
+          }
+        };
+      };
+    </script>
+  </head>
+  <body ng-controller="GameListCtrl">
+    <br>
+      <div class="row">
+	<fieldset>
+		<legend>SteamNews</legend>
+		<p>SteamNews takes the news from Steam Community pages and turns them into RSS, to make it easier for you to keep up with games as they're updated via your favourite news reader.</p>
+		<p>This is mostly useful for Early Access games, that are updated frequently.</p>
+		<p>You can search for multiple games by separating search terms with a comma.</p>
+		<p>Feedback and complaints welcome by email to nathan at this domain.</p>
+	</fieldset>
+      </div>
+    <div class="row">
+      <div class="small-6 columns">
+        <input type="text" placeholder="Search" ng-model="delayedQuery">
+      </div>
+    </div>
+    <div class="row" ng-cloak>
+      <div class="large-12 columns">
+        <table>
+          <thead>
+            <tr>
+              <th width="400">Name</th>
+              <th width="200">Steam Store URL</th>
+              <th width="400">URL</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr ng-repeat="game in games | filter:FilterGame | orderBy:'name'">
+              <td>{{ game.name }}</td>
+              <td><a target="_blank" href="http://store.steampowered.com/app/{{ game.appid }}">View On Steam</a></td>
+              <td><input type="text" value="http://www.getoffmalawn.com/steamnews/{{ game.appid }}.atom" select-on-click></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title type="text">{{ name }}</title>
+  <id>http://www.getoffmalawn.com/steamnews/games/{{ appid }}.atom</id>
+  <updated>{{ updatetime|isodate }}Z</updated>
+  <link href="http://www.getoffmalawn.com/" />
+  <link href="http://www.getoffmalawn.com/steamnews/games/{{ appid }}.atom" rel="self" />
+  <generator>Magic Genie</generator>
+  {% for n in newsitems[:10] -%}
+  <entry xml:base="http://www.getoffmalawn.com/steamnews/games/{{ appid }}.atom">
+    <title type="text">{{ n.title }}</title>
+    <id>{{ n.gid }}</id>
+    <updated>{{ n.date|isodate }}Z</updated>
+    <link href="{{ n.url }}" />
+    <author>
+      <name>{{ n.author }}</name>
+    </author>
+    <content type="html">
+    {{ n.contents|bbcode }}
+    </content>
+  </entry>{% endfor %}
+</feed>
