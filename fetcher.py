@@ -152,7 +152,7 @@ class AtomRenderer:
 
         env = Environment()
         env.loader = DictLoader({'atom': atom_template})
-        env.filters['bbcode'] = self.render_bbcode
+        env.filters['article'] = self.render_article
         env.filters['isodate'] = self.isodate
 
         self.env = env
@@ -160,8 +160,14 @@ class AtomRenderer:
         self.bbcode_parser = bbcode.Parser()
         self.bbcode_parser.add_simple_formatter('img', '<img src="%(value)s">')
 
-    def render_bbcode(self, value):
-        return cgi.escape(self.bbcode_parser.format(value))
+    def render_article(self, value):
+        for k in self.bbcode_parser.recognized_tags.keys():
+            k = '[%s]' % k
+
+            if k in value:
+                return cgi.escape(self.bbcode_parser.format(value))
+
+        return cgi.escape(value)  # assumed HTML
 
     def isodate(self, value):
         return datetime.datetime.fromtimestamp(value).isoformat()

@@ -16,7 +16,7 @@
       <name>{{ n.author }}</name>
     </author>
     <content type="html">
-    {{ n.contents|bbcode }}
+    {{ n.contents|article }}
     </content>
   </entry>{% endfor %}
 </feed>
