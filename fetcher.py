@@ -162,7 +162,9 @@ class AtomRenderer:
 
     def render_article(self, value):
         for k in self.bbcode_parser.recognized_tags.keys():
-            k = '[%s]' % k
+
+            # don't check closing bracket for [url=...] tags.
+            k = '[%s' % k
 
             if k in value:
                 return cgi.escape(self.bbcode_parser.format(value))
