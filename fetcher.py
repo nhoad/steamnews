@@ -157,8 +157,12 @@ class AtomRenderer:
 
         self.env = env
 
-        self.bbcode_parser = bbcode.Parser()
+        self.bbcode_parser = bbcode.Parser(escape_html=False)
         self.bbcode_parser.add_simple_formatter('img', '<img src="%(value)s">')
+
+        for i in range(1, 7):
+            tag = 'h%d' % i
+            self.bbcode_parser.add_simple_formatter(tag, '<{t}>%(value)s</{t}>'.format(t=tag))
 
     def render_article(self, value):
         for k in self.bbcode_parser.recognized_tags.keys():
