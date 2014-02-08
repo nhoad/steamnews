@@ -282,6 +282,9 @@ class GameDB:
                 game = yield from future
 
                 if game:
+                    with open('steamnews/%s.json' % game['appid'], 'w') as f:
+                        json.dump(game, f)
+
                     with open('steamnews/%s.atom.tmp' % game['appid'], 'w') as f:
                         f.write(xml_renderer(game))
 
