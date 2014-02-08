@@ -112,10 +112,14 @@ class AppDetails(HTTPProtocol):
 
 
 class Game:
-    def __init__(self, appid, name):
+    def __init__(self, appid, name, windows, mac, linux, early_access):
         self.appid = int(appid)
         self.name = name
         self.newsitems = []
+        self.windows = windows
+        self.mac = mac
+        self.linux = linux
+        self.early_access = early_access
 
     @asyncio.coroutine
     def get_news(self):
@@ -134,6 +138,10 @@ class Game:
         return {
             'appid': self.appid,
             'name': self.name,
+            'windows': self.windows,
+            'mac': self.mac,
+            'linux': self.linux,
+            'early_access': self.early_access,
         }
 
     def as_dict(self):
@@ -142,6 +150,10 @@ class Game:
             'name': self.name,
             'newsitems': self.newsitems,
             'updatetime': time.time(),
+            'windows': self.windows,
+            'mac': self.mac,
+            'linux': self.linux,
+            'early_access': self.early_access,
         }
 
 
@@ -194,7 +206,7 @@ class GameDB:
 
         if should_create:
             cur = db.cursor()
-            cur.execute('CREATE TABLE games (appid integer primary key, name varchar, type varchar)')
+            cur.execute('CREATE TABLE games (appid integer primary key, name varchar, type varchar, windows boolean, mac boolean, linux boolean, early_access boolean)')
             db.commit()
 
         self.db = db
@@ -243,15 +255,23 @@ class GameDB:
             for appid, game_info in info.items():
                 appid = int(appid)
                 name = games_map[appid]
-                game_type = game_info.get('data', {}).get('type', "UNKNOWN!!")
-                apps.append((appid, name, game_type))
+                game_data = game_info.get('data', {})
+                game_type = game_data.get('type', "UNKNOWN!!")
+                early_access = 70 in set(int(m['id']) for m in game_data.get('genres', []))
+                platforms = game_data.get('platforms', {})
 
-            cursor.executemany('INSERT INTO games (appid, name, type) VALUES (?, ?, ?)', apps)
+                windows = platforms.get('windows', False)
+                mac = platforms.get('mac', False)
+                linux = platforms.get('linux', False)
+                f = (appid, name, game_type, windows, mac, linux, early_access)
+                apps.append(f)
+
+            cursor.executemany('INSERT INTO games (appid, name, type, windows, mac, linux, early_access) VALUES (?, ?, ?, ?, ?, ?, ?)', apps)
             self.db.commit()
 
     def get_all(self):
         c = self.db.cursor()
-        games = c.execute("SELECT appid, name FROM games where type == 'game'").fetchall()
+        games = c.execute("SELECT appid, name, windows, mac, linux, early_access FROM games where type == 'game'").fetchall()
         return [Game(*g) for g in games]
 
     def write_frontend(self):

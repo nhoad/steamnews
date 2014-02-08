@@ -23,6 +23,11 @@
         $scope.split_queries = [];
         $scope.timeout = null;
 
+        $scope.windows = true;
+        $scope.mac = true;
+        $scope.linux = true;
+        $scope.early_access = false;
+
         $scope.$watch("delayedQuery", function() {
           if ($scope.timeout != null) {
             clearTimeout($scope.timeout);
@@ -42,6 +47,19 @@
         });
 
         $scope.FilterGame = function(game) {
+          var show_windows = $scope.windows;
+          var show_mac = $scope.mac;
+          var show_linux = $scope.linux;
+          var early_access = $scope.early_access;
+
+          if (!((show_linux && game.linux) || (show_windows && game.windows) || (show_mac && game.mac))) {
+            return;
+          }
+
+          if (early_access && !game.early_access) {
+            return;
+          }
+
           if ($scope.query.length == 0) {
             return game;
           }
@@ -71,6 +89,13 @@
       <div class="small-6 columns">
         <input type="text" placeholder="Search" ng-model="delayedQuery">
       </div>
+      <div class="small-6 columns">
+        <br>
+        <input type="checkbox" id="windows" ng-model="windows"><label for="windows">Windows</label>
+        <input type="checkbox" id="mac" ng-model="mac"><label for="mac">Mac</label>
+        <input type="checkbox" id="linux" ng-model="linux"><label for="linux">Linux</label>
+        <input type="checkbox" id="early-access" ng-model="early_access"><label for="early-access">Early Access</label>
+      </div>
     </div>
     <div class="row" ng-cloak>
       <div class="large-12 columns">
@@ -78,14 +103,16 @@
           <thead>
             <tr>
               <th width="400">Name</th>
-              <th width="200">Steam Store URL</th>
               <th width="400">URL</th>
             </tr>
           </thead>
           <tbody>
             <tr ng-repeat="game in games | filter:FilterGame | orderBy:'name'">
-              <td>{{ game.name }}</td>
-              <td><a target="_blank" href="http://store.steampowered.com/app/{{ game.appid }}">View On Steam</a></td>
+              <td>
+                <a target="_blank" href="http://store.steampowered.com/app/{{ game.appid }}">
+                  {{ game.name }}
+                </a>
+              </td>
               <td><input type="text" value="http://www.getoffmalawn.com/steamnews/{{ game.appid }}.atom" select-on-click></td>
             </tr>
           </tbody>
