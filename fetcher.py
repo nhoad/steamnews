@@ -157,7 +157,7 @@ class AtomRenderer:
 
         self.env = env
 
-        self.bbcode_parser = bbcode.Parser(escape_html=False)
+        self.bbcode_parser = bbcode.Parser(escape_html=False, replace_links=False)
         self.bbcode_parser.add_simple_formatter('img', '<img src="%(value)s">')
 
         for i in range(1, 7):
