@@ -182,7 +182,8 @@ class AtomRenderer:
             # don't check closing bracket for [url=...] tags.
             k = '[%s' % k
 
-            if k in value:
+            # handle upper case tags
+            if k in value.lower():
                 return cgi.escape(self.bbcode_parser.format(value))
 
         return cgi.escape(value)  # assumed HTML
