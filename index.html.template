@@ -20,6 +20,7 @@
         $scope.games = INSERT_GAMES_HERE;
         $scope.delayedQuery = "";
         $scope.query = "";
+        $scope.limit = 500;
         $scope.split_queries = [];
         $scope.timeout = null;
 
@@ -86,15 +87,26 @@
 	</fieldset>
       </div>
     <div class="row">
-      <div class="small-6 columns">
+      <div class="small-4 columns">
         <input type="text" placeholder="Search" ng-model="delayedQuery">
       </div>
-      <div class="small-6 columns">
-        <br>
+      <div class="small-5 columns" style="padding-top:0.5em">
         <input type="checkbox" id="windows" ng-model="windows"><label for="windows">Windows</label>
         <input type="checkbox" id="mac" ng-model="mac"><label for="mac">Mac</label>
         <input type="checkbox" id="linux" ng-model="linux"><label for="linux">Linux</label>
         <input type="checkbox" id="early-access" ng-model="early_access"><label for="early-access">Early Access</label>
+      </div>
+      <div class="small-1 columns" style="padding-right: 0px">
+        <label class="right inline" for="limit">Max</label>
+      </div>
+      <div class="small-2 columns">
+        <select id="limit" ng-model="limit">
+          <option value="100">100</option>
+          <option value="200">200</option>
+          <option value="500">500</option>
+          <option value="1000">1000</option>
+          <option value="10000">No Limit</option>
+        </select>
       </div>
     </div>
     <div class="row" ng-cloak>
@@ -107,7 +119,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr ng-repeat="game in games | filter:FilterGame | orderBy:'name'">
+            <tr ng-repeat="game in games | filter:FilterGame | orderBy:'name' | limitTo:limit">
               <td>
                 <a target="_blank" href="http://store.steampowered.com/app/{{ game.appid }}">
                   {{ game.name }}
