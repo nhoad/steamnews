@@ -8,14 +8,6 @@
 
     <script>
       var app = angular.module('steamnews', []);
-      app.directive('selectOnClick', function () {
-          return function (scope, element, attrs) {
-            element.bind('click', function () {
-              this.select();
-            });
-          };
-      });
-
       function GameListCtrl($scope, $http) {
         $scope.games = INSERT_GAMES_HERE;
         $scope.delayedQuery = "";
@@ -125,7 +117,11 @@
                   {{ game.name }}
                 </a>
               </td>
-              <td><input type="text" value="http://www.getoffmalawn.com/steamnews/{{ game.appid }}.atom" select-on-click></td>
+              <td>
+                <a href="http://www.getoffmalawn.com/steamnews/{{ game.appid }}.atom">
+                  http://www.getoffmalawn.com/steamnews/{{ game.appid }}.atom
+                </a>
+              </td>
             </tr>
           </tbody>
         </table>
