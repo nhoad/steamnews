@@ -78,13 +78,13 @@
   <body ng-controller="GameListCtrl">
     <br>
       <div class="row">
-	<fieldset>
-		<legend>SteamNews</legend>
-		<p>SteamNews takes the news from Steam Community pages and turns them into RSS, to make it easier for you to keep up with games as they're updated via your favourite news reader.</p>
-		<p>This is mostly useful for Early Access games, that are updated frequently.</p>
-		<p>You can search for multiple games by separating search terms with a comma.</p>
-		<p>Feedback and complaints welcome by email to nathan at this domain.</p>
-	</fieldset>
+        <fieldset>
+          <legend>SteamNews</legend>
+          <p>SteamNews takes the news from Steam Community pages and turns them into RSS, to make it easier for you to keep up with games as they're updated via your favourite news reader.</p>
+          <p>This is mostly useful for Early Access games, that are updated frequently.</p>
+          <p>You can search for multiple games by separating search terms with a comma.</p>
+          <p>Feedback and complaints welcome by email to nathan at this domain.</p>
+        </fieldset>
       </div>
     <div class="row">
       <div class="small-4 columns">
