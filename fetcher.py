@@ -245,7 +245,7 @@ class GameDB:
 
         cursor = self.db.cursor()
 
-        for future in asyncio.as_completed(app_details_futures):
+        for future in app_details_futures:
             try:
                 info = yield from future
             except ValueError as e:
