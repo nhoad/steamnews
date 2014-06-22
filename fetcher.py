@@ -1,19 +1,24 @@
 #!/usr/bin/python
 
-import cgi
-import os
-import json
-import sqlite3
-import datetime
-import time
 import asyncio
+import cgi
+import datetime
+import json
+import logging
+import os
 import re
+import sqlite3
+import sys
+import time
 
 from io import BytesIO
 
 import bbcode
 
 from jinja2 import Environment, Template, DictLoader
+
+
+log = logging.getLogger('steamnews')
 
 
 API_DOMAIN = 'api.steampowered.com'
@@ -45,10 +50,7 @@ class HTTPProtocol(asyncio.Protocol):
     def connection_lost(self, exc):
         response = self.buf.getvalue()
 
-        try:
-            data = self.decode_response(response)
-        except Exception as e:
-            self.future.set_exception(e)
+        data = self.decode_response(response)
 
     @classmethod
     def get(cls, param):
@@ -67,10 +69,20 @@ Connection: close\r
         return request.future
 
     def decode_response(self, response):
-        _headers, body = response.split(b'\r\n\r\n', 1)
-        data = json.loads(body.decode('utf8'))
-        data = self.final_decoding(data)
-        self.future.set_result(data)
+        try:
+            _headers, body = response.split(b'\r\n\r\n', 1)
+        except ValueError as e:
+            log.exception('Error splitting HTTP response %r', response)
+            self.future.set_exception(e)
+        else:
+            try:
+                data = json.loads(body.decode('utf8'))
+            except ValueError as e:
+                log.exception("Error parsing JSON response %r", response)
+                self.future.set_exception(e)
+            else:
+                data = self.final_decoding(data)
+                self.future.set_result(data)
 
     def final_decoding(self, data):
         return data
@@ -121,14 +133,19 @@ class Game:
         self.linux = linux
         self.early_access = early_access
 
-    @asyncio.coroutine
-    def get_news(self):
+    def needs_update(self):
         try:
+            # to avoid server errors breaking feeds for too long, we actually
+            # run this job every 15 minutes, but we want to avoid hitting the
+            # server if we've modified the file in the past hour.
             if os.path.getmtime('steamnews/%s.atom' % self.appid) > (time.time() - (60*60)):
-                return
+                return False
         except FileNotFoundError:
             pass
+        return True
 
+    @asyncio.coroutine
+    def get_news(self):
         news = yield from GameNews.get(self.appid)
         self.newsitems = news.get('appnews', {}).get('newsitems', [])
 
@@ -222,11 +239,13 @@ class GameDB:
         unknown_games = [g for g in unknown_games if not self.USELESS(g['name'])]
 
         if unknown_games:
-            print('Will check out {} games.'.format(len(unknown_games)))
+            log.info('Will check out {} unknown games.'.format(len(unknown_games)))
             s = time.time()
             unknown_games = yield from self.filter_out_garbage(unknown_games)
             e = time.time()
-            print('took %.2f seconds' % (e - s))
+            log.info('took %.2f seconds' % (e - s))
+        else:
+            log.info("No new games to check out (we know about all %s)", len(known_ids))
 
         self.games = self.get_all()
 
@@ -265,6 +284,7 @@ class GameDB:
                 mac = platforms.get('mac', False)
                 linux = platforms.get('linux', False)
                 f = (appid, name, game_type, windows, mac, linux, early_access)
+                log.debug('appid=%s name=%s game_type=%s windows=%s mac=%s linux=%s early_acess=%s' % f)
                 apps.append(f)
 
             cursor.executemany('INSERT INTO games (appid, name, type, windows, mac, linux, early_access) VALUES (?, ?, ?, ?, ?, ?, ?)', apps)
@@ -293,6 +313,11 @@ class GameDB:
         xml_renderer = AtomRenderer()
         chunk_size = 500
         total = len(games)
+
+        total_games = len(games)
+        games = [g for g in games if g.needs_update()]
+        log.info("Out of %d games, %d need updating", total_games, len(games))
+
         chunked_games = [games[i:i + chunk_size] for i in range(0, len(games), chunk_size)]
 
         for games in chunked_games:
@@ -313,7 +338,7 @@ class GameDB:
                     os.rename('steamnews/%s.atom.tmp' % game['appid'], 'steamnews/%s.atom' % game['appid'])
 
             total -= len(games)
-            print('completed %d items in %.2f seconds (%d remaining)' % (len(games), time.time()-s, total))
+            log.info('Completed %d items in %.2f seconds (%d remaining)' % (len(games), time.time()-s, total))
 
 
 @asyncio.coroutine
@@ -323,25 +348,45 @@ def main(timeout):
     API_ADDR = (yield from EVENT_LOOP.getaddrinfo(API_DOMAIN, 80))[0][-1][0]
     STORE_ADDR = (yield from EVENT_LOOP.getaddrinfo(STORE_DOMAIN, 80))[0][-1][0]
 
+    log.info("Retrieving list of games on Steam")
+
     # dummy required parameter :(
     games = yield from AppList.get(None)
+
+    log.debug("done")
 
     db = GameDB()
 
     yield from db.update(games)
+
+    log.info("Retrieving news for games")
     yield from db.get_news()
 
+    log.debug("done")
+
+    log.info("Writing out frontend")
     db.write_frontend()
+    log.debug("done")
 
     timeout.set_result(True)
 
 if __name__ == '__main__':
+    logging.basicConfig(
+        filename='steamnews.log',
+        level=logging.DEBUG if 'debug' in sys.argv else logging.INFO,
+        format='[%(asctime)s] %(levelname)s %(message)s'
+    )
+    logging.getLogger('asyncio').setLevel(logging.INFO)
+
+    log.info('Starting')
     f = asyncio.Future()
 
     def timeout(future):
-        print('oh no timeout')
+        log.info('Shutting down after 10 minutes')
         future.set_result(True)
 
     EVENT_LOOP.call_later(60*10, timeout, f)
     asyncio.async(main(f))
     EVENT_LOOP.run_until_complete(f)
+
+    log.info('Finished')
