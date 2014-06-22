@@ -78,7 +78,7 @@ Connection: close\r
             try:
                 data = json.loads(body.decode('utf8'))
             except ValueError as e:
-                log.exception("Error parsing JSON response %r", response)
+                log.exception("Error parsing JSON response %r for request %r", response, self.request_data)
                 self.future.set_exception(e)
             else:
                 data = self.final_decoding(data)
@@ -314,9 +314,8 @@ class GameDB:
         chunk_size = 500
         total = len(games)
 
-        total_games = len(games)
         games = [g for g in games if g.needs_update()]
-        log.info("Out of %d games, %d need updating", total_games, len(games))
+        log.info("Out of %d games, %d need updating", total, len(games))
 
         chunked_games = [games[i:i + chunk_size] for i in range(0, len(games), chunk_size)]
 
