@@ -250,10 +250,16 @@ class GameDB:
 
     @asyncio.coroutine
     def filter_out_garbage(self, games):
-        chunk_size = 20
+        chunk_size = 200
 
         games_map = {game['appid']: game['name'] for game in games}
 
+        chunked_games = [games[i:i + chunk_size] for i in range(0, len(games), chunk_size)]
+
+        for games in chunked_games:
+            yield from self._chunked_filter_out_garbage(games, games_map)
+
+    def _chunked_filter_out_garbage(self, games, games_map):
         app_details_futures = asyncio.as_completed([
             asyncio.async(AppDetails.get(game['appid']))
             for game in games
