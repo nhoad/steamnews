@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import resource
 import sqlite3
 import sys
 import time
@@ -116,10 +117,8 @@ class AppDetails(HTTPProtocol):
 
     @classmethod
     def get_params(cls, param):
-        if isinstance(param, list):
-            param = ','.join(map(str, param))
-        else:
-            param = str(param)
+        assert not isinstance(param, list)
+        param = str(param)
         return dict(uri=APPDETAILS_URI.format(appids=param))
 
 
@@ -255,11 +254,9 @@ class GameDB:
 
         games_map = {game['appid']: game['name'] for game in games}
 
-        chunked_games = [games[i:i + chunk_size] for i in range(0, len(games), chunk_size)]
-
         app_details_futures = asyncio.as_completed([
-            asyncio.async(AppDetails.get([g['appid'] for g in games]))
-            for games in chunked_games
+            asyncio.async(AppDetails.get(game['appid']))
+            for game in games
         ])
 
         cursor = self.db.cursor()
@@ -378,6 +375,10 @@ if __name__ == '__main__':
     logging.getLogger('asyncio').setLevel(logging.INFO)
 
     log.info('Starting')
+
+    log.info("Pushing fd limits higher")
+    resource.setrlimit(resource.RLIMIT_NOFILE, (50000, 50000))
+
     f = asyncio.Future()
 
     def timeout(future):
