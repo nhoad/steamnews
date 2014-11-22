@@ -1,5 +1,6 @@
 #!/usr/bin/python
 
+import aiohttp
 import asyncio
 import cgi
 import datetime
@@ -12,8 +13,6 @@ import sqlite3
 import sys
 import time
 
-from io import BytesIO
-
 import bbcode
 
 from jinja2 import Environment, Template, DictLoader
@@ -21,105 +20,134 @@ from jinja2 import Environment, Template, DictLoader
 
 log = logging.getLogger('steamnews')
 
-
-API_DOMAIN = 'api.steampowered.com'
-STORE_DOMAIN = 'store.steampowered.com'
-GAME_NEWS_URI = '/ISteamNews/GetNewsForApp/v0002/?appid={appid}&count=3&format=json'
-APPLIST_URI = '/ISteamApps/GetAppList/v0002/'
-APPDETAILS_URI = '/api/appdetails/?appids={appids}'
-USER_AGENT = 'steamnews/0.0.1'
-
 EVENT_LOOP = asyncio.get_event_loop()
 
+# trim out things that we know, in our heart of hearts, are garbage, that
+# no one wants to know about.
+# Also, this is crazy gross. I'm sorry.
+USELESS = re.compile(r'(.*(\?\?\?|ValveTestApp|Game Key| E3 |DLC|Dedicated [Ss]erver|_|Soundtrack|Pre\-[Oo]rder|Teaser|[tT]railer|Trailer \d|Add\-On|CD Key).*|(.*(Gameplay|Preview|Review|Pack|Strategy Guide|Development Kit|Foil Conversion|Foil|Deck Key|Demo)$))').match
 
-class HTTPProtocol(asyncio.Protocol):
-    domain = API_DOMAIN
+MAX_GAME_LOOKUPS = 200
 
-    def __init__(self, data, param):
-        self.future = asyncio.Future()
-        self.request_data = data
-        self.param = param
 
-    def connection_made(self, transport):
-        self.buf = BytesIO()
-        self.transport = transport
-        self.transport.write(self.request_data)
+CONN_POOL = aiohttp.TCPConnector()
 
-    def data_received(self, data):
-        self.buf.write(data)
 
-    def connection_lost(self, exc):
-        response = self.buf.getvalue()
+@asyncio.coroutine
+def get_app_list():
+    r = yield from aiohttp.request(
+        'GET', 'http://api.steampowered.com/ISteamApps/GetAppList/v0002/',
+        connector=CONN_POOL)
+    app_list = yield from r.json()
+    app_list = app_list['applist']['apps']
+    return app_list
 
-        data = self.decode_response(response)
 
-    @classmethod
-    def get(cls, param):
-        params = cls.get_params(param)
-        # we cheat with HTTP/1.0 to avoid handling chunked decoding. I'm sorry.
-        data = '''GET {uri} HTTP/1.0\r
-Host: {domain}\r
-User-Agent: {user_agent}\r
-Connection: close\r
-\r
-'''.format(domain=cls.domain, user_agent=USER_AGENT, **params)
+@asyncio.coroutine
+def check_out_unknown_games(games, db):
+    games = [g for g in games if not USELESS(g['name'])]
 
-        request = cls(data.encode('utf8'), param)
-        asyncio.async(EVENT_LOOP.create_connection(lambda: request, host=cls.addr(), port=80))
+    cursor = db.cursor()
 
-        return request.future
+    known_ids = set(f[0] for f in cursor.execute('SELECT appid FROM games').fetchall())
 
-    def decode_response(self, response):
+    unknown_games = [g for g in games if int(g['appid']) not in known_ids][:MAX_GAME_LOOKUPS]
+
+    if unknown_games:
+        log.info('Will check out {} unknown games (out of {}, {} done so far).'.format(len(unknown_games), len(games), len(known_ids)))
+        s = time.time()
+        unknown_games = yield from lookup_games(unknown_games, db)
+        e = time.time()
+        log.info('took %.2f seconds' % (e - s))
+    else:
+        log.info("No new games to check out (we know about all %s)", len(known_ids))
+
+
+@asyncio.coroutine
+def update_game_news(db):
+    cursor = db.cursor()
+    games = get_games(db)
+    games = [g for g in games if g.needs_update()]
+
+    xml_renderer = AtomRenderer()
+
+    game_futures = asyncio.as_completed([
+        asyncio.async(game.get_news())
+        for game in games
+    ])
+
+    for future in game_futures:
+        game = yield from future
+
+        if game:
+            with open('steamnews/%s.json' % game['appid'], 'w') as f:
+                json.dump(game, f, indent=4)
+
+            with open('steamnews/%s.atom.tmp' % game['appid'], 'w') as f:
+                f.write(xml_renderer(game))
+
+            # hack to make it atomic.
+            os.rename('steamnews/%s.atom.tmp' % game['appid'], 'steamnews/%s.atom' % game['appid'])
+
+
+def write_frontend(db):
+    games = get_games(db)
+
+    with open('index.html.template') as f:
+        template = f.read()
+
+    with open('steamnews/index.html.tmp', 'w') as f:
+        # gross, I know.
+        f.write(template.replace('INSERT_GAMES_HERE', json.dumps([g.as_slim_dict() for g in games])))
+
+    # hack to make it atomic.
+    os.rename('steamnews/index.html.tmp', 'steamnews/index.html')
+
+
+@asyncio.coroutine
+def lookup_games(games, db):
+    cursor = db.cursor()
+
+    games_map = {game['appid']: game['name'] for game in games}
+
+    apps = []
+
+    game_futures = [
+        (game, asyncio.async(get_game_details(game['appid'])))
+        for game in games
+    ]
+
+    for game, future in game_futures:
         try:
-            _headers, body = response.split(b'\r\n\r\n', 1)
+            info = yield from future
         except ValueError as e:
-            log.exception('Error splitting HTTP response %r', response)
-            self.future.set_exception(e)
-        else:
-            try:
-                data = json.loads(body.decode('utf8'))
-            except ValueError as e:
-                log.exception("Error parsing JSON response %r for request %r", response, self.request_data)
-                self.future.set_exception(e)
-            else:
-                data = self.final_decoding(data)
-                self.future.set_result(data)
+            log.info("Error getting details for %s", game['appid'])
+            continue
 
-    def final_decoding(self, data):
-        return data
+        for appid, game_info in info.items():
+            appid = int(appid)
+            name = games_map[appid]
+            game_data = game_info.get('data', {})
+            game_type = game_data.get('type', "UNKNOWN!!")
+            early_access = 70 in set(int(m['id']) for m in game_data.get('genres', []))
+            platforms = game_data.get('platforms', {})
 
-    @classmethod
-    def addr(cls):
-        return API_ADDR
+            windows = platforms.get('windows', False)
+            mac = platforms.get('mac', False)
+            linux = platforms.get('linux', False)
+            f = (appid, name, game_type, windows, mac, linux, early_access)
+            log.debug('appid=%s name=%s game_type=%s windows=%s mac=%s linux=%s early_access=%s' % f)
+            apps.append(f)
 
-
-class AppList(HTTPProtocol):
-    @classmethod
-    def get_params(cls, param):
-        return dict(uri=APPLIST_URI)
-
-    def final_decoding(self, json):
-        return json['applist']['apps']
+    cursor.executemany('INSERT INTO games (appid, name, type, windows, mac, linux, early_access) VALUES (?, ?, ?, ?, ?, ?, ?)', apps)
+    db.commit()
 
 
-class GameNews(HTTPProtocol):
-    @classmethod
-    def get_params(cls, param):
-        return dict(uri=GAME_NEWS_URI.format(appid=param))
-
-
-class AppDetails(HTTPProtocol):
-    domain = STORE_DOMAIN
-
-    @classmethod
-    def addr(cls):
-        return STORE_ADDR
-
-    @classmethod
-    def get_params(cls, param):
-        assert not isinstance(param, list)
-        param = str(param)
-        return dict(uri=APPDETAILS_URI.format(appids=param))
+def get_games(db):
+    cursor = db.cursor()
+    games = cursor.execute("SELECT appid, name, windows, mac, linux, early_access FROM games where type == 'game'").fetchall()
+    games = [Game(*g) for g in games]
+    return games
 
 
 class Game:
@@ -145,9 +173,10 @@ class Game:
 
     @asyncio.coroutine
     def get_news(self):
-        news = yield from GameNews.get(self.appid)
+        uri = 'http://api.steampowered.com/ISteamNews/GetNewsForApp/v0002/?appid={appid}&count=3&format=json'.format(appid=self.appid)
+        r = yield from aiohttp.request('GET', uri, connector=CONN_POOL)
+        news = yield from r.json()
         self.newsitems = news.get('appnews', {}).get('newsitems', [])
-
         return self.as_dict()
 
     def as_slim_dict(self):
@@ -211,166 +240,37 @@ class AtomRenderer:
         return self.env.get_template('atom').render(game)
 
 
-class GameDB:
-    # trim out things that we know, in our heart of hearts, are garbage, that
-    # no one wants to know about.
-    # Also, this is crazy gross. I'm sorry.
-    USELESS = re.compile(r'(.*(\?\?\?|ValveTestApp|Game Key| E3 |DLC|Dedicated [Ss]erver|_|Soundtrack|Pre\-[Oo]rder|Teaser|[tT]railer|Trailer \d|Add\-On|CD Key).*|(.*(Gameplay|Preview|Review|Pack|Strategy Guide|Development Kit|Foil Conversion|Foil|Deck Key|Demo)$))').match
+def open_db():
+    should_create = not os.path.exists('games.db')
+    db = sqlite3.connect('games.db')
 
-    def __init__(self):
-        should_create = not os.path.exists('games.db')
-        db = sqlite3.connect('games.db')
-
-        if should_create:
-            cur = db.cursor()
-            cur.execute('CREATE TABLE games (appid integer primary key, name varchar, type varchar, windows boolean, mac boolean, linux boolean, early_access boolean)')
-            db.commit()
-
-        self.db = db
-
-    @asyncio.coroutine
-    def update(self, games):
-
-        c = self.db.cursor()
-        known_ids = set(f[0] for f in c.execute('SELECT appid FROM games').fetchall())
-
-        unknown_games = (g for g in games if int(g['appid']) not in known_ids)
-        unknown_games = [g for g in unknown_games if not self.USELESS(g['name'])]
-
-        if unknown_games:
-            log.info('Will check out {} unknown games.'.format(len(unknown_games)))
-            s = time.time()
-            unknown_games = yield from self.filter_out_garbage(unknown_games)
-            e = time.time()
-            log.info('took %.2f seconds' % (e - s))
-        else:
-            log.info("No new games to check out (we know about all %s)", len(known_ids))
-
-        self.games = self.get_all()
-
-    @asyncio.coroutine
-    def filter_out_garbage(self, games):
-        chunk_size = 200
-
-        games_map = {game['appid']: game['name'] for game in games}
-
-        chunked_games = [games[i:i + chunk_size] for i in range(0, len(games), chunk_size)]
-
-        for games in chunked_games:
-            yield from self._chunked_filter_out_garbage(games, games_map)
-
-    def _chunked_filter_out_garbage(self, games, games_map):
-        app_details_futures = asyncio.as_completed([
-            asyncio.async(AppDetails.get(game['appid']))
-            for game in games
-        ])
-
-        cursor = self.db.cursor()
-
-        for future in app_details_futures:
-            try:
-                info = yield from future
-            except ValueError as e:
-                continue
-
-            apps = []
-
-            for appid, game_info in info.items():
-                appid = int(appid)
-                name = games_map[appid]
-                game_data = game_info.get('data', {})
-                game_type = game_data.get('type', "UNKNOWN!!")
-                early_access = 70 in set(int(m['id']) for m in game_data.get('genres', []))
-                platforms = game_data.get('platforms', {})
-
-                windows = platforms.get('windows', False)
-                mac = platforms.get('mac', False)
-                linux = platforms.get('linux', False)
-                f = (appid, name, game_type, windows, mac, linux, early_access)
-                log.debug('appid=%s name=%s game_type=%s windows=%s mac=%s linux=%s early_acess=%s' % f)
-                apps.append(f)
-
-            cursor.executemany('INSERT INTO games (appid, name, type, windows, mac, linux, early_access) VALUES (?, ?, ?, ?, ?, ?, ?)', apps)
-            self.db.commit()
-
-    def get_all(self):
-        c = self.db.cursor()
-        games = c.execute("SELECT appid, name, windows, mac, linux, early_access FROM games where type == 'game'").fetchall()
-        return [Game(*g) for g in games]
-
-    def write_frontend(self):
-        with open('index.html.template') as f:
-            template = f.read()
-
-        with open('steamnews/index.html.tmp', 'w') as f:
-            # gross, I know.
-            f.write(template.replace('INSERT_GAMES_HERE', json.dumps([g.as_slim_dict() for g in self.games])))
-
-        # hack to make it atomic.
-        os.rename('steamnews/index.html.tmp', 'steamnews/index.html')
-
-    @asyncio.coroutine
-    def get_news(self):
-        games = self.games
-
-        xml_renderer = AtomRenderer()
-        chunk_size = 500
-        total = len(games)
-
-        games = [g for g in games if g.needs_update()]
-        log.info("Out of %d games, %d need updating", total, len(games))
-
-        chunked_games = [games[i:i + chunk_size] for i in range(0, len(games), chunk_size)]
-
-        for games in chunked_games:
-            s = time.time()
-            news_futures = [asyncio.async(game.get_news()) for game in games]
-
-            for future in asyncio.as_completed(news_futures):
-                game = yield from future
-
-                if game:
-                    with open('steamnews/%s.json' % game['appid'], 'w') as f:
-                        json.dump(game, f)
-
-                    with open('steamnews/%s.atom.tmp' % game['appid'], 'w') as f:
-                        f.write(xml_renderer(game))
-
-                    # hack to make it atomic.
-                    os.rename('steamnews/%s.atom.tmp' % game['appid'], 'steamnews/%s.atom' % game['appid'])
-
-            total -= len(games)
-            log.info('Completed %d items in %.2f seconds (%d remaining)' % (len(games), time.time()-s, total))
+    if should_create:
+        cur = db.cursor()
+        cur.execute('CREATE TABLE games (appid integer primary key, name varchar, type varchar, windows boolean, mac boolean, linux boolean, early_access boolean)')
+        db.commit()
+    return db
 
 
 @asyncio.coroutine
-def main(timeout):
-    global API_ADDR, STORE_ADDR
+def get_game_details(gameid):
+    uri = 'http://store.steampowered.com/api/appdetails/?appids={}'.format(gameid)
+    r = yield from aiohttp.request('GET', uri, connector=CONN_POOL)
+    json = yield from r.json()
+    if r.status == 429:
+        raise ValueError("Exceeded the rate limit!!")
+    return json
 
-    API_ADDR = (yield from EVENT_LOOP.getaddrinfo(API_DOMAIN, 80))[0][-1][0]
-    STORE_ADDR = (yield from EVENT_LOOP.getaddrinfo(STORE_DOMAIN, 80))[0][-1][0]
 
-    log.info("Retrieving list of games on Steam")
+@asyncio.coroutine
+def main():
+    app_list = yield from get_app_list()
 
-    # dummy required parameter :(
-    games = yield from AppList.get(None)
+    with open_db() as db:
+        yield from check_out_unknown_games(app_list, db)
+        yield from update_game_news(db)
 
-    log.debug("done")
+        write_frontend(db)
 
-    db = GameDB()
-
-    yield from db.update(games)
-
-    log.info("Retrieving news for games")
-    yield from db.get_news()
-
-    log.debug("done")
-
-    log.info("Writing out frontend")
-    db.write_frontend()
-    log.debug("done")
-
-    timeout.set_result(True)
 
 if __name__ == '__main__':
     logging.basicConfig(
@@ -383,16 +283,11 @@ if __name__ == '__main__':
     log.info('Starting')
 
     log.info("Pushing fd limits higher")
-    resource.setrlimit(resource.RLIMIT_NOFILE, (50000, 50000))
+    try:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (50000, 50000))
+    except ValueError:
+        pass
 
-    f = asyncio.Future()
-
-    def timeout(future):
-        log.info('Shutting down after 10 minutes')
-        future.set_result(True)
-
-    EVENT_LOOP.call_later(60*10, timeout, f)
-    asyncio.async(main(f))
-    EVENT_LOOP.run_until_complete(f)
+    EVENT_LOOP.run_until_complete(main())
 
     log.info('Finished')
