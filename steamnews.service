@@ -1,0 +1,11 @@
+[Unit]
+Description=Steam News processor
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /root/steamnews/fetcher.py
+WorkingDirectory=/root/steamnews/
+TimeoutSec=5min 50s
+
+[Install]
+WantedBy=default.target
