@@ -111,6 +111,7 @@
             </tr>
           </thead>
           <tbody>
+            {% raw %}
             <tr ng-repeat="game in games | filter:FilterGame | orderBy:'name' | limitTo:limit">
               <td>
                 <a target="_blank" href="http://store.steampowered.com/app/{{ game.appid }}">
@@ -123,6 +124,7 @@
                 </a>
               </td>
             </tr>
+            {% endraw %}
           </tbody>
         </table>
       </div>
